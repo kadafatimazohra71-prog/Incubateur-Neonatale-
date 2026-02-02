@@ -1,0 +1,135 @@
+<!-- ===================== PAGE HTML ===================== -->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Commande LED & Capteurs - Arduino R4 WiFi</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f2f2f2;
+      text-align: center;
+      margin-top: 50px;
+    }
+    h1 { color: #333; }
+    button {
+      width: 150px;
+      height: 50px;
+      font-size: 18px;
+      margin: 10px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .on { background-color: #4CAF50; color: white; }
+    .off { background-color: #f44336; color: white; }
+    .sensor { margin-top: 20px; font-size: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Commande LED & Capteurs Arduino R4 WiFi</h1>
+  <a href="/ON"><button class="on">LED ON</button></a>
+  <a href="/OFF"><button class="off">LED OFF</button></a>
+  <div class="sensor">
+    <p>Température DHT11: <span id="temp">--</span> °C</p>
+    <p>Humidité: <span id="hum">--</span> %</p>
+    <p>Poids: <span id="weight">--</span> g</p>
+    <p>Température à distance GY-906: <span id="irTemp">--</span> °C</p>
+  </div>
+</body>
+</html>
+
+/* ===================== CODE ARDUINO ===================== */
+#include <WiFiS3.h>
+#include <DHT.h>
+#include "HX711.h"
+#include <Adafruit_MLX90614.h> // GY-906
+
+// WiFi
+const char* ssid = "Asmaa";
+const char* password = "123456789010";
+WiFiServer server(80);
+
+// LED
+int ledPin = 13;
+
+// DHT11
+#define DHTPIN 2
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+// HX711 (capteur poids)
+#define DT 3
+#define SCK 4
+HX711 scale;
+
+// GY-906 (MLX90614)
+Adafruit_MLX90614 mlx = Adafruit_MLX90614();
+
+void setup() {
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);
+
+  Serial.begin(9600);
+  while (!Serial);
+
+  Serial.print("Connexion au WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi connecté");
+  Serial.print("Adresse IP : ");
+  Serial.println(WiFi.localIP());
+  server.begin();
+
+  // Initialisation capteurs
+  dht.begin();
+  scale.begin(DT, SCK);
+  scale.set_scale();
+  scale.tare();
+
+  if (!mlx.begin()) {
+    Serial.println("Erreur de communication avec GY-906");
+  }
+}
+
+void loop() {
+  WiFiClient client = server.available();
+  if (client) {
+    String request = client.readStringUntil('\r');
+    client.flush();
+
+    // Commande LED
+    if (request.indexOf("/ON") != -1) digitalWrite(ledPin, HIGH);
+    if (request.indexOf("/OFF") != -1) digitalWrite(ledPin, LOW);
+
+    // Lecture capteurs
+    float temp = dht.readTemperature();
+    float hum = dht.readHumidity();
+    float weight = scale.get_units(10);
+    float irTemp = mlx.readObjectTempC();
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: text/html");
+    client.println("Connection: close");
+    client.println();
+
+    client.println("<!DOCTYPE html>");
+    client.println("<html><head><title>LED & Capteurs</title></head><body>");
+    client.println("<h1>Commande LED & Capteurs Arduino R4 WiFi</h1>");
+    client.println("<a href=\"/ON\"><button>LED ON</button></a>");
+    client.println("<a href=\"/OFF\"><button>LED OFF</button></a>");
+    client.println("<div class=\"sensor\">");
+    client.println("<p>Température DHT11: " + String(temp) + " °C</p>");
+    client.println("<p>Humidité: " + String(hum) + " %</p>");
+    client.println("<p>Poids: " + String(weight) + " g</p>");
+    client.println("<p>Température à distance GY-906: " + String(irTemp) + " °C</p>");
+    client.println("</div></body></html>");
+
+    delay(1);
+    client.stop();
+  }
+}
